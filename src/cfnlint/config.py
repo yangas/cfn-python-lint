@@ -25,6 +25,7 @@ import six
 import jsonschema
 import cfnlint.decode.cfn_yaml
 from cfnlint.version import __version__
+from cfnlint.helpers import REGIONS
 try:  # pragma: no cover
     from pathlib import Path
 except ImportError:  # pragma: no cover
@@ -224,6 +225,19 @@ def comma_separated_arg(string):
     return string.split(',')
 
 
+def comma_separated_rule_names(string):
+    """ Split a comma separated list and check it aligns with valid rulenames """
+    nargs = string.split(',')
+    rules_trie = cfnlint.core.get_rules([], [], ['I', 'E', 'W'], {}).rules_trie
+
+    for arg in nargs:
+        # Trie with no matches on prefix returns []
+        if not rules_trie.values(arg):
+            raise ValueError("Rule {} is not a valid rule name. Rules must represent prefixes or fully qualified names. ie. E3001 or E3.".format(arg))
+
+    return nargs
+
+
 def _ensure_value(namespace, name, value):
     if getattr(namespace, name, None) is None:
         setattr(namespace, name, value)
@@ -365,6 +379,11 @@ class CliArgs(object):
             help='only check rules whose id do not match these values'
         )
         standard.add_argument(
+            '-m', '--mandatory-checks', dest='mandatory_checks', nargs='+', default=[],
+            type=comma_separated_rule_names, action='extend',
+            help='Always check these rules regardless of template exclusions. Must be fully qualified rule names ie. E3001.'
+        )
+        standard.add_argument(
             '-c', '--include-checks', dest='include_checks', nargs='+', default=[],
             type=comma_separated_arg, action='extend',
             help='include rules whose id match these values'
@@ -477,6 +496,11 @@ class ConfigMixIn(TemplateArgs, CliArgs, ConfigFileArgs, object):
         return self._get_argument_value('ignore_checks', True, True)
 
     @property
+    def mandatory_checks(self):
+        """ mandatory_checks """
+        return self._get_argument_value('mandatory_checks', False, True)
+
+    @property
     def include_checks(self):
         """ include_checks """
         return self._get_argument_value('include_checks', True, True)
@@ -492,6 +516,8 @@ class ConfigMixIn(TemplateArgs, CliArgs, ConfigFileArgs, object):
         results = self._get_argument_value('regions', True, True)
         if not results:
             return ['us-east-1']
+        if 'ALL_REGIONS' in results:
+            return REGIONS
         return results
 
     @property

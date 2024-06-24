@@ -23,6 +23,7 @@ from copy import deepcopy, copy
 from datetime import datetime
 import six
 from yaml.parser import ParserError
+from pytrie import StringTrie
 import cfnlint.helpers
 import cfnlint.conditions
 from cfnlint.transform import Transform
@@ -150,7 +151,7 @@ class CloudFormationLintRule(object):
 class RulesCollection(object):
     """Collection of rules"""
 
-    def __init__(self, ignore_rules=None, include_rules=None, configure_rules=None, include_experimental=False):
+    def __init__(self, ignore_rules=None, include_rules=None, configure_rules=None, include_experimental=False, mandatory_rules=None):
         self.rules = []
 
         # Whether "experimental" rules should be added
@@ -158,8 +159,10 @@ class RulesCollection(object):
 
         # Make Ignore Rules not required
         self.ignore_rules = ignore_rules or []
+        self.mandatory_rules = mandatory_rules or []
         self.include_rules = include_rules or []
         self.configure_rules = configure_rules or []
+        self.rules_trie = StringTrie()
         # by default include 'W' and 'E'
         # 'I' has to be included manually for backwards compabitility
         self.include_rules.extend(['W', 'E'])
@@ -168,6 +171,7 @@ class RulesCollection(object):
         """Register rules"""
         if self.is_rule_enabled(rule.id, rule.experimental):
             self.rules.append(rule)
+            self.rules_trie[rule.id] = rule.id
             if rule.id in self.configure_rules:
                 rule.configure(self.configure_rules[rule.id])
 
@@ -182,6 +186,7 @@ class RulesCollection(object):
         for rule in more:
             if self.is_rule_enabled(rule.id, rule.experimental):
                 self.rules.append(rule)
+                self.rules_trie[rule.id] = rule.id
                 if rule.id in self.configure_rules:
                     rule.configure(self.configure_rules[rule.id])
 
@@ -204,7 +209,7 @@ class RulesCollection(object):
             return False
         # Allowing ignoring of rules based on prefix to ignore checks
         for ignore_rule in self.ignore_rules:
-            if rule_id.startswith(ignore_rule) and ignore_rule:
+            if rule_id.startswith(ignore_rule) and ignore_rule and rule_id not in self.mandatory_rules:
                 return False
 
         return True
@@ -1317,11 +1322,12 @@ class Runner(object):
     """Run all the rules"""
 
     def __init__(
-            self, rules, filename, template, regions, verbosity=0):
+            self, rules, filename, template, regions, verbosity=0, mandatory_rules=None):
 
         self.rules = rules
         self.filename = filename
         self.verbosity = verbosity
+        self.mandatory_rules = mandatory_rules or []
         self.cfn = Template(filename, template, regions)
 
     def transform(self):
@@ -1357,7 +1363,7 @@ class Runner(object):
         return_matches = []
         for match in matches:
             if not any(match == u for u in return_matches):
-                if match.rule.id not in directives:
+                if match.rule.id not in directives or match.rule.id in self.mandatory_rules:
                     return_matches.append(match)
                 else:
                     exception = False
